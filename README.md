@@ -1,1 +1,1 @@
-# insights_network
+# Insights Network
