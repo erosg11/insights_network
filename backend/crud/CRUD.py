@@ -3,12 +3,12 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from entitys import InsightORM, TagORM, NewInsight, Tag
+from entitys import InsightORM, TagORM, NewInsight, Tag, insight_tag
 
 
 def create_tag(db: Session, name: str) -> TagORM:
     tag = TagORM()
-    tag.nome = name
+    tag.name = name
     db.add(tag)
     db.commit()
     db.refresh(tag)
@@ -17,22 +17,27 @@ def create_tag(db: Session, name: str) -> TagORM:
 
 def _create_tag_in_memory(name: str) -> TagORM:
     tag = TagORM()
-    tag.nome = name
+    tag.name = name
     return tag
+
+
+def _refresh_and_return(db: Session, object_):
+    db.refresh(object_)
+    return object_
 
 
 def create_multiple_tags(db: Session, names: List[str]) -> List[TagORM]:
     tags = [_create_tag_in_memory(name) for name in names]
     db.add_all(tags)
     db.commit()
-    tags = [db.refresh(x) for x in tags]
+    tags = [_refresh_and_return(db, x) for x in tags]
     return tags
 
 
 def _get_tags_or_insert(db: Session, new_insight_tags: List[str]):
-    tags = db.query(TagORM).filter(TagORM.nome.in_(new_insight_tags)).all()  # type: List[TagORM]
+    tags = db.query(TagORM).filter(TagORM.name.in_(new_insight_tags)).all()  # type: List[TagORM]
     if len(tags) < len(new_insight_tags):
-        found_tag_names = {x.nome for x in tags}
+        found_tag_names = {x.name for x in tags}
         new_tags = set(new_insight_tags)
         tags_to_insert = list(new_tags - found_tag_names)
         tags += create_multiple_tags(db, tags_to_insert)
@@ -42,7 +47,7 @@ def _get_tags_or_insert(db: Session, new_insight_tags: List[str]):
 def create_insight(db: Session, new_insight: NewInsight):
     insight = InsightORM()
     insight.texto = new_insight.texto
-    insight.data_modificao = insight.data_criacao = datetime.now()
+    insight.data_modificacao = insight.data_criacao = datetime.now()
     tags = _get_tags_or_insert(db, new_insight.tags)
     insight.tags = tags
     db.add(insight)
@@ -60,6 +65,7 @@ def get_insight_by_id(db: Session, id: int) -> InsightORM:
 
 
 def delete_insight(db: Session, id: int):
+    db.query(insight_tag).filter(insight_tag.c.insight_id == id).delete()
     _get_insight_by_id(db, id).delete()
     db.commit()
 
@@ -72,13 +78,13 @@ def update_insight(db: Session, id: int, new_insight: NewInsight) -> InsightORM:
     update = {}
     if old_insight.texto != new_insight.texto:
         update['texto'] = new_insight.texto
-    old_tags = {x.nome for x in old_insight.tags}
+    old_tags = {x.name for x in old_insight.tags}
     new_tags = set(new_insight.tags)
     if new_tags != old_tags:
         tags = old_insight.tags
         tags_to_remove = old_tags - new_tags
         if tags_to_remove:
-            tags = [x for x in tags if x.nome not in tags_to_remove]
+            tags = [x for x in tags if x.name not in tags_to_remove]
         tags_to_insert = new_tags - old_tags
         if tags_to_insert:
             tags += _get_tags_or_insert(db, list(tags_to_insert))
@@ -86,14 +92,19 @@ def update_insight(db: Session, id: int, new_insight: NewInsight) -> InsightORM:
     if not update:
         raise ValueError('No update')
     update['data_modificao'] = datetime.now()
-    pointer_insight.update(update)
+    for attr, value in update.items():
+        setattr(old_insight, attr, value)
     db.commit()
     db.refresh(old_insight)
     return old_insight
 
 
-def list_cards(db: Session, tags, skip=0, limit=10) -> List[InsightORM]:
-    return db.query(InsightORM).join(TagORM).filter(TagORM.nome.in_(tags)).skip(skip).limit(limit).all()
+def list_cards(db: Session, tags=None, skip=0, limit=10) -> List[InsightORM]:
+    query = db.query(InsightORM).join(TagORM, InsightORM.tags)
+    if tags is not None:
+        return query.filter(TagORM.name.in_(tags)).order_by(InsightORM.id.desc()).offset(skip).limit(limit).all()
+    else:
+        return query.order_by(InsightORM.id.desc()).offset(skip).limit(limit).all()
 
 
 def _get_tag_by_id(db, id):
@@ -105,16 +116,16 @@ def get_tag_by_id(db: Session, id: int) -> TagORM:
 
 
 def delete_tag(db: Session, id: int):
+    db.query(insight_tag).filter(insight_tag.c.tag_id == id).delete()
     _get_tag_by_id(db, id).delete()
     db.commit()
 
 
 def update_tag(db: Session, id: int, new_tag: Tag):
     old_tag = get_tag_by_id(db, id)
-    if old_tag.nome == new_tag.name:
+    if old_tag.name == new_tag.name:
         raise ValueError('No update')
-
-    old_tag.nome = new_tag.name
+    old_tag.name = new_tag.name
     db.commit()
     db.refresh(old_tag)
     return old_tag

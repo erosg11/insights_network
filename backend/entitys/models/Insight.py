@@ -1,5 +1,5 @@
-from typing import List
 from datetime import datetime
+from typing import List
 
 from pydantic import BaseModel
 
@@ -16,3 +16,10 @@ class Insight(NewInsight):
     data_criacao: datetime
     data_modificacao: datetime
     tags: List[Tag]
+
+    class Config:
+        orm_mode = True
+
+
+class InsightList(BaseModel):
+    insights: List[Insight]
